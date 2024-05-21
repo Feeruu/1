@@ -5,8 +5,8 @@ import sqlite3
 import matplotlib.pyplot as plt
 from collections import defaultdict
 import io
-import contextvars
 user_states = {}
+user_states_update = {}
 class UserState:
     def __init__(self, survey_id, current_question, col_questions, questions):
         self.survey_id = survey_id
@@ -18,6 +18,23 @@ def get_user_state(chat_id):
     if chat_id not in user_states:
         user_states[chat_id] = UserState(None, 0, 0, [])
     return user_states[chat_id]
+
+class UserStateUpdate:
+    def __init__(self, survey_name, survey_id, current_question, col_questions, questions, current_option, col_options, options):
+        self.survey_name = survey_name
+        self.survey_id = survey_id
+        self.current_question = current_question
+        self.col_questions = col_questions
+        self.questions = questions
+        self.current_option = current_option
+        self.col_options = col_options
+        self.options = options
+
+def get_user_state_update(chat_id):
+    if chat_id not in user_states_update:
+        user_states_update[chat_id] = UserStateUpdate(None, None, 0, 0, [], 0, 0, [])
+    return user_states_update[chat_id]
+
 bot = telebot.TeleBot('7082484484:AAGvOulj_lXSQO2fmklzUJMPM7_24tpWB70')
 names = {}
 admin = None
@@ -48,6 +65,14 @@ def check_survey(id):
     conn.close()
     return ch
 
+def check_survey_id(id):
+    conn = sqlite3.connect('users2.sql')
+    cur = conn.cursor()
+    cur.execute("SELECT survey_name FROM survey WHERE id=?", [id])
+    ch = cur.fetchone()
+    cur.close()
+    conn.close()
+    return ch[0] if ch else None
 
 def check_prava(chat_id):
     conn = sqlite3.connect('users2.sql')
@@ -88,13 +113,11 @@ def start(message):
     conn.close()
 
     markup = telebot.types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True)
-    item1 = telebot.types.InlineKeyboardButton('Список пользователей', callback_data='button3')
     item2 = telebot.types.KeyboardButton('Зарегистрироваться')
     item3 = telebot.types.KeyboardButton('Продолжить')
-    markup.add(item1, item2, item3)
+    markup.add(item2, item3)
     bot.reply_to(message, "Хотите зарегистрироваться или продолжить?", reply_markup=markup)
-    # bot.send_message(message.chat.id, 'Для регистрации введите ваше имя')
-    # bot.register_next_step_handler(message, user_name)
+
 
 
 @bot.message_handler(func=lambda message: message.text == 'Зарегистрироваться')
@@ -183,7 +206,7 @@ def con_admin(call):
     chat_id = call.message.chat.id
     status = check_prava(chat_id)
     print(status)
-    if status[0] == 1:
+    if status[0] == 2 or 1:
         markup = telebot.types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True)
         # item1 = telebot.types.InlineKeyboardButton('Создать опрос', callback_data='survey')
         item1 = telebot.types.KeyboardButton('Создать опрос')
@@ -191,7 +214,8 @@ def con_admin(call):
         item4 = telebot.types.KeyboardButton('Список пользователей')
         item3 = telebot.types.KeyboardButton('Редактировать опрос')
         item5 = telebot.types.KeyboardButton('Получить отчет')
-        markup.add(item1, item2, item3, item4, item5)
+        item6 = telebot.types.KeyboardButton('Изменить права доступа')
+        markup.add(item1, item2, item3, item4, item5, item6)
         bot.send_message(call.message.chat.id, "Что хотите сделать, руководитель?", reply_markup=markup)
         conn = sqlite3.connect('users2.sql')
         cur = conn.cursor()
@@ -210,7 +234,7 @@ def list1(message):
     chat_id = message.chat.id
     status = check_prava(chat_id)
     print(status)
-    if status[0] == 1:
+    if status[0] == 2 or 1:
         conn = sqlite3.connect('users2.sql')
         cur = conn.cursor()
 
@@ -234,7 +258,7 @@ def opros(message):
     chat_id = message.chat.id
     status = check_prava(chat_id)
     print(status)
-    if status[0] == 0:
+    if status[0] == 2 or 1:
         conn = sqlite3.connect('users2.sql')
         cur = conn.cursor()
         cur.execute(
@@ -450,7 +474,7 @@ def survey(message):
     chat_id = message.chat.id
     status = check_prava(chat_id)
     print(status)
-    if status[0] == 1:
+    if status[0] == 1 or 2:
         bot.send_message(message.chat.id, 'Введите название опроса', reply_markup=telebot.types.ReplyKeyboardRemove())
         bot.register_next_step_handler(message, nazv)
     else:
@@ -582,7 +606,7 @@ def save_options_to_db(message, id_survey, id_question, num_options, current_opt
             markup.add(button_return)
             users = get_all_users()
             for user in users:
-                bot.send_message(user, f'Новый опрос "{check_survey(id_survey)}" создан. Пожалуйста, пройдите его.')
+                bot.send_message(user, f'Новый опрос "{check_survey_id(id_survey)}" создан. Пожалуйста, пройдите его.')
             bot.send_message(message.chat.id, "Опрос создан", reply_markup=markup)
             telebot.types.ReplyKeyboardRemove()
 @bot.message_handler(func=lambda message: message.text == 'Удалить опрос')
@@ -593,7 +617,7 @@ def delete(message):
     chat_id = message.chat.id
     status = check_prava(chat_id)
     print(status)
-    if status[0] == 1:
+    if status[0] == 1 or 2:
         conn = sqlite3.connect('users2.sql')
         cur = conn.cursor()
         cur.execute('SELECT id, survey_name FROM survey')
@@ -643,117 +667,225 @@ def test1(message):
 
 @bot.message_handler(func=lambda message: message.text == 'Редактировать опрос')
 def survey_update(message):
-    markup2 = telebot.types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True)
-    item1 = telebot.types.KeyboardButton('')
-    markup2.add(item1)
     chat_id = message.chat.id
     status = check_prava(chat_id)
-    print(status)
-    if status[0] == 1:
-        bot.send_message(message.chat.id, 'Введите название опроса', reply_markup=telebot.types.ReplyKeyboardRemove())
+    if status[0] == 1 or 2:
+        conn = sqlite3.connect('users2.sql')
+        cur = conn.cursor()
+        cur.execute('SELECT id, survey_name FROM survey')
+        surveys = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        markup = telebot.types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True)
+        for survey in surveys:
+            markup.add(telebot.types.KeyboardButton(survey[1]))
+        bot.send_message(message.chat.id, 'Выберите название опроса', reply_markup=markup)
         bot.register_next_step_handler(message, nazv_update)
     else:
         bot.send_message(chat_id, 'У Вас недостаточно прав для этого действия')
 
-
 def nazv_update(message):
-    global sn_update
-    # bot.register_next_step_handler(call.message, user_pass_reg)
+    chat_id = message.chat.id
     survey_name = message.text.strip()
-    sn_update = survey_name
-    print(survey_name)
-    bot.send_message(message.chat.id, 'Введите название нового опроса')
-    bot.register_next_step_handler(message, update)
-def update(message):
-    global sn_update
-    survey_name = message.text.strip()
+    user_state = get_user_state_update(chat_id)
+    user_state.survey_name = survey_name
+
     conn = sqlite3.connect('users2.sql')
     cur = conn.cursor()
-    cur.execute("UPDATE survey SET survey_name=? WHERE survey_name=?", (survey_name, sn_update))
-    conn.commit()
     cur.execute("SELECT id FROM survey WHERE survey_name=?", (survey_name,))
-    abc = cur.fetchone()
-    try:
-        cur.execute("SELECT * FROM survey_questions WHERE id_survey=?", abc)
-    except:
-        bot.send_message(message.chat.id, "Введите заново название опроса:")
-        bot.register_next_step_handler(message, update)
+    survey_id = cur.fetchone()
+
+    if not survey_id:
+        bot.send_message(chat_id, "Такого опроса не существует. Попробуйте снова.")
+        bot.register_next_step_handler(message, nazv_update)
         return
-    abc1 = cur.fetchall()
-    abc11 = len(abc1)
+
+    user_state.survey_id = survey_id[0]
+    cur.execute("SELECT id, question_text FROM survey_questions WHERE id_survey=?", (survey_id[0],))
+    questions = cur.fetchall()
+    user_state.questions = questions
+    user_state.col_questions = len(questions)
+
     cur.close()
     conn.close()
-    sn_update = survey_name
-    global current_question
-    global col_questions
+
+    bot.send_message(chat_id, 'Введите новое название опроса')
+    bot.register_next_step_handler(message, update_survey_name)
+
+def update_survey_name(message):
+    chat_id = message.chat.id
+    new_survey_name = message.text.strip()
+    user_state = get_user_state_update(chat_id)
+
+    conn = sqlite3.connect('users2.sql')
+    cur = conn.cursor()
+    cur.execute("UPDATE survey SET survey_name=? WHERE id=?", (new_survey_name, user_state.survey_id))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    user_state.survey_name = new_survey_name
+    bot.send_message(chat_id, 'Введите новое количество вопросов')
+    bot.register_next_step_handler(message, update_question_count)
+
+def update_question_count(message):
+    chat_id = message.chat.id
+    user_state = get_user_state_update(chat_id)
+
     try:
-        col_questions = abc11
+        new_question_count = int(message.text.strip())
+        if new_question_count < 0:
+            raise ValueError("Количество вопросов должно быть положительным числом.")
     except ValueError:
-        markup = telebot.types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True)
-        button_return = telebot.types.KeyboardButton(text='Редактировать опрос')
-        markup.add(button_return)
-        bot.send_message(message.chat.id, 'Неверно указано количество', reply_markup=markup)
+        bot.send_message(chat_id, 'Неверное количество. Попробуйте снова.')
+        bot.register_next_step_handler(message, update_question_count)
         return
 
-    print(col_questions)
-    current_question = 1
-    bot.send_message(message.chat.id, f"{current_question} вопрос:")
-    bot.register_next_step_handler(message, save_to_db_update)
-
-
-def save_to_db_update(message):
-    global sn_update
-    global col
-    global col1
-    text = message.text
-    print(sn_update, 'Это сн апдейт в сэйв дб')
     conn = sqlite3.connect('users2.sql')
     cur = conn.cursor()
-    cur.execute("SELECT id FROM survey WHERE survey_name=?", [sn_update])
-    id_survey = cur.fetchone()
-    print(id_survey, 'это айди сурви в сэйв дб')
+
+    if new_question_count > user_state.col_questions:
+        for _ in range(new_question_count - user_state.col_questions):
+            cur.execute("INSERT INTO survey_questions (id_survey, question_text) VALUES (?, ?)", (user_state.survey_id, ''))
+    elif new_question_count < user_state.col_questions:
+        cur.execute("DELETE FROM survey_questions WHERE id_survey=? ORDER BY id DESC LIMIT ?", (user_state.survey_id, user_state.col_questions - new_question_count))
+
     conn.commit()
-    cur.close()
-    conn.close()
-    conn = sqlite3.connect('users2.sql')
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM survey_questions WHERE id_survey=?", id_survey)
-    idd = cur.fetchone()
-    print(idd)
-    print(col1, 'это col1')
-    if col1 == 0:
-        col = idd[0]
-        i = col
-    else:
-        col = col1
-        i = col1
-    print(i, 'это aa')
-    cur.execute("UPDATE survey_questions SET question_text=? WHERE id=? AND id_survey=?",  (text, i, id_survey[0]))
-    conn.commit()
-    col += 1
-    col1 = col
+    cur.execute("SELECT id, question_text FROM survey_questions WHERE id_survey=?", (user_state.survey_id,))
+    user_state.questions = cur.fetchall()
+    user_state.col_questions = new_question_count
+
     cur.close()
     conn.close()
 
-    global current_question
-    global col_questions
-    current_question += 1
-    if current_question <= col_questions:
-        bot.send_message(message.chat.id, f"{current_question} вопрос:")
-        bot.register_next_step_handler(message, save_to_db_update)
-    else:
-        current_question = None
-        col_questions = None
-        sn_update = None
-        col = 0
-        col1 = 0
-        markup = telebot.types.InlineKeyboardMarkup()
-        button_return = telebot.types.InlineKeyboardButton(text='Вернуться к командам', callback_data='con_admin')
-        markup.add(button_return)
-        bot.send_message(message.chat.id, "Опрос отредактирован", reply_markup=markup)
-        telebot.types.ReplyKeyboardRemove()
+    user_state.current_question = 0
+    ask_update_question(chat_id)
 
-        # con_admin(call.message)
+def ask_update_question(chat_id):
+    user_state = get_user_state_update(chat_id)
+    if user_state.current_question < user_state.col_questions:
+        question_text = user_state.questions[user_state.current_question][1]
+        bot.send_message(chat_id, f"{user_state.current_question + 1} вопрос: {question_text}\nВведите новый текст вопроса:")
+        bot.register_next_step_handler_by_chat_id(chat_id, update_question_text)
+    else:
+        user_state.current_question = 0
+        user_state.current_option = 0
+        ask_update_options(chat_id)
+
+def update_question_text(message):
+    chat_id = message.chat.id
+    new_question_text = message.text.strip()
+    user_state = get_user_state_update(chat_id)
+
+    conn = sqlite3.connect('users2.sql')
+    cur = conn.cursor()
+    question_id = user_state.questions[user_state.current_question][0]
+    cur.execute("UPDATE survey_questions SET question_text=? WHERE id=?", (new_question_text, question_id))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    user_state.questions[user_state.current_question] = (question_id, new_question_text)
+    user_state.current_question += 1
+
+    ask_update_question(chat_id)
+
+def ask_update_options(chat_id):
+    user_state = get_user_state_update(chat_id)
+    if user_state.current_question < user_state.col_questions:
+        question_text = user_state.questions[user_state.current_question][1]
+        question_id = user_state.questions[user_state.current_question][0]
+        conn = sqlite3.connect('users2.sql')
+        cur = conn.cursor()
+        cur.execute('SELECT option_text FROM survey_options WHERE id_question = ? AND id_survey = ?', (question_id, user_state.survey_id))
+        options = cur.fetchall()
+        user_state.options = options
+        user_state.col_options = len(options)
+        cur.close()
+        conn.close()
+
+        if user_state.col_options > 0:
+            bot.send_message(chat_id, f"Введите количество новых вариантов ответа для вопроса '{question_text}'")
+            bot.register_next_step_handler_by_chat_id(chat_id, get_new_options_count)
+        else:
+            bot.send_message(chat_id, f"Введите количество вариантов ответа для вопроса '{question_text}'")
+            bot.register_next_step_handler_by_chat_id(chat_id, get_new_options_count)
+    else:
+        finalize_update(chat_id)
+
+def get_new_options_count(message):
+    chat_id = message.chat.id
+    user_state = get_user_state_update(chat_id)
+    try:
+        user_state.col_options = int(message.text.strip())
+    except ValueError:
+        bot.send_message(chat_id, 'Неверное количество. Попробуйте снова.')
+        bot.register_next_step_handler(message, get_new_options_count)
+        return
+
+    user_state.current_option = 0
+    ask_new_option_text(chat_id)
+
+def ask_new_option_text(chat_id):
+    user_state = get_user_state_update(chat_id)
+    question_text = user_state.questions[user_state.current_question][1]
+    bot.send_message(chat_id, f"Введите новый текст {user_state.current_option + 1}-го варианта ответа для вопроса '{question_text}':")
+    bot.register_next_step_handler_by_chat_id(chat_id, save_new_option)
+
+def save_new_option(message):
+    chat_id = message.chat.id
+    new_option_text = message.text.strip()
+    user_state = get_user_state_update(chat_id)
+
+    conn = sqlite3.connect('users2.sql')
+    cur = conn.cursor()
+    question_id = user_state.questions[user_state.current_question][0]
+    cur.execute("INSERT INTO survey_options (id_survey, id_question, option_text) VALUES (?, ?, ?)", (user_state.survey_id, question_id, new_option_text))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    user_state.current_option += 1
+
+    if user_state.current_option < user_state.col_options:
+        ask_new_option_text(chat_id)
+    else:
+        user_state.current_question += 1
+        ask_update_options(chat_id)
+
+def update_option_text(message):
+    chat_id = message.chat.id
+    new_option_text = message.text.strip()
+    user_state = get_user_state_update(chat_id)
+
+    if user_state.current_option < len(user_state.options):
+        conn = sqlite3.connect('users2.sql')
+        cur = conn.cursor()
+        question_id = user_state.questions[user_state.current_question][0]
+        option_text = user_state.options[user_state.current_option][0]
+        cur.execute("UPDATE survey_options SET option_text=? WHERE id_survey=? AND id_question=? AND option_text=?",
+                    (new_option_text, user_state.survey_id, question_id, option_text))
+        conn.commit()
+        cur.close()
+        conn.close()
+
+    user_state.current_option += 1
+
+    if user_state.current_option < user_state.col_options:
+        bot.send_message(chat_id, f"Введите новый текст {user_state.current_option + 1}-го варианта ответа для вопроса '{user_state.questions[user_state.current_question][1]}':")
+        bot.register_next_step_handler_by_chat_id(chat_id, update_option_text)
+    else:
+        user_state.current_question += 1
+        user_state.current_option = 0  # Сбрасываем для следующего вопроса
+        ask_update_options(chat_id)
+
+def finalize_update(chat_id):
+    markup = telebot.types.InlineKeyboardMarkup()
+    button_return = telebot.types.InlineKeyboardButton(text='Вернуться к командам', callback_data='con_admin')
+    markup.add(button_return)
+    bot.send_message(chat_id, "Опрос отредактирован", reply_markup=markup)
+    del user_states_update[chat_id]
 
 @bot.callback_query_handler(func=lambda c: c.data == 'con_user')
 def con_user(call):
@@ -780,7 +912,7 @@ def handle_get_report(message):
     surveys = cur.fetchall()
     cur.close()
     conn.close()
-    if status[0] == 1:
+    if status[0] == 1 or 2:
         if surveys:
             markup = telebot.types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True)
             for survey in surveys:
@@ -901,5 +1033,53 @@ def generate_report(survey_id):
     data = process_responses(responses)
     analysis_results = analyze_responses(data, questions)
     plot_analysis(analysis_results, survey_id)
+
+@bot.message_handler(func=lambda message: message.text == 'Изменить права доступа')
+def change_user_access(message):
+    chat_id = message.chat.id
+    status = check_prava(chat_id)
+    if status[0] == 2:  # Проверка, что у пользователя статус 2 (настоящий админ)
+        conn = sqlite3.connect('users2.sql')
+        cur = conn.cursor()
+        cur.execute("SELECT id, chat_id, first_name, last_name, admin FROM users2 WHERE admin IN (0, 1)")
+        users = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        if users:
+            markup = telebot.types.InlineKeyboardMarkup()
+            for user in users:
+                user_id, user_chat_id, first_name, last_name, user_status = user
+                button_text = f"{first_name} {last_name} (ID: {user_chat_id}) | Статус: {user_status}"
+                callback_data = f"change_status:{user_id}:{user_status}"
+                button = telebot.types.InlineKeyboardButton(button_text, callback_data=callback_data)
+                markup.add(button)
+            button_return = telebot.types.InlineKeyboardButton('Вернуться к командам', callback_data='con_admin')
+            markup.add(button_return)
+            bot.send_message(chat_id, "Выберите пользователя для изменения прав доступа:", reply_markup=markup)
+        else:
+            bot.send_message(chat_id, "Нет доступных пользователей для изменения прав доступа.")
+    else:
+        bot.send_message(chat_id, "У вас недостаточно прав для этого действия.")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('change_status:'))
+def handle_change_status(call):
+    chat_id = call.message.chat.id
+    data = call.data.split(':')
+    user_id = int(data[1])
+    current_status = int(data[2])
+    new_status = 1 if current_status == 0 else 0
+
+    conn = sqlite3.connect('users2.sql')
+    cur = conn.cursor()
+    cur.execute("UPDATE users2 SET admin=? WHERE id=?", (new_status, user_id))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    bot.answer_callback_query(call.id, "Права доступа обновлены.")
+    bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="Права доступа обновлены.")
+    # Optionally, you can resend the list of users to allow further changes
+    change_user_access(call.message)
 
 bot.polling(none_stop=True)
